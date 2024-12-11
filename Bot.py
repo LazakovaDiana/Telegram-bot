@@ -5,7 +5,8 @@ from telebot import types
 bot_token = '8181858011:AAFtFMwUVPKWkVWyAz4vf-aN-SWVXRDMpAo'
 bot = telebot.TeleBot(bot_token)
 
-
+# URL дашборда
+DASHBOARD_URL = 'http://127.0.0.1:8050/'
 
 # Словарь для хранения задач
 tasks = {}
@@ -66,6 +67,10 @@ def message_pvz(message):
             with open(image_path, 'rb') as photo:
                 bot.send_photo(message.chat.id, photo)
 
+        markup = types.InlineKeyboardMarkup()
+        pvz = types.InlineKeyboardButton('Посмотреть дашборд', url=DASHBOARD_URL)
+        markup.row(pvz)
+        bot.send_message(message.chat.id, 'Тыкай👇', parse_mode='html', reply_markup=markup)
 
 @bot.message_handler(func=lambda message: message.text == "Удалить задачу")
 def delete_task(message):
