@@ -1,87 +1,106 @@
 import telebot
-import time
+from telebot import types
 
 # Замените 'YOUR_BOT_TOKEN' на токен вашего бота
 bot_token = '8181858011:AAFtFMwUVPKWkVWyAz4vf-aN-SWVXRDMpAo'
 bot = telebot.TeleBot(bot_token)
 
+# URL дашборда
+DASHBOARD_URL = 'http://127.0.0.1:8050/'
+
 # Словарь для хранения задач
 tasks = {}
 task_id_counter = 1  # Счетчик для уникальных ID задач
 manager_chat_id = None  # ID менеджера, куда будут отправляться отчеты
+executors = {}  # Словарь для хранения исполнителей и их chat_id
 
 
 @bot.message_handler(commands=['start'])
 def start(message):
-    bot.send_message(message.chat.id,
-                     "Добро пожаловать в бот управления проектами! Используйте /help для получения списка команд.")
+    bot.send_message(message.chat.id, "Добро пожаловать в бот управления проектами!")
+    main_menu(message.chat.id)
 
 
-@bot.message_handler(commands=['help'])
-def help_command(message):
-    help_text = (
-        "/add_task <задача> - Добавить новую задачу\n"
-        "/assign_task <ID> <исполнитель> - Назначить исполнителя на задачу по ID\n"
-        "/assign_executor <ID> <исполнитель_id> - Назначить исполнителя по его ID на задачу\n"
-        "/view_tasks - Просмотреть все задачи\n"
-        "/complete_task <ID> - Завершить задачу по ID и отправить отчет менеджеру\n"
-        "/delete_task <ID> - Удалить задачу по ID\n"
-        "/clear_tasks - Очистить все задачи\n"
-        "/set_manager <ID> - Установить ID менеджера для получения отчетов\n"
+def main_menu(chat_id):
+    markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
+    markup.add(
+        types.KeyboardButton("🈺Добавить задачу🈺"),
+        types.KeyboardButton("📜Просмотреть задачи📜"),
+        types.KeyboardButton("✔️Завершить задачу✔️"),
+        types.KeyboardButton("Назначить исполнителя"),
+        types.KeyboardButton("Удалить задачу"),
+        types.KeyboardButton("Очистить задачи"),
+        types.KeyboardButton("Установить менеджера"),
+        types.KeyboardButton("Зарегистрировать исполнителя"),
+        types.KeyboardButton("📋Просмотреть исполнителей📋"),
+        types.KeyboardButton("ПВЗ"),
     )
-    bot.send_message(message.chat.id, help_text)
+    bot.send_message(chat_id, "Выберите действие:", reply_markup=markup)
 
 
-@bot.message_handler(commands=['add_task'])
+@bot.message_handler(func=lambda message: message.text == "Очистить задачи")
+def delete_all_tasks(message):
+    global tasks  # Объявляем, что мы будем использовать глобальную переменную
+    tasks.clear()  # Очищаем словарь с задачами
+    bot.send_message(message.chat.id, "Все задачи успешно удалены.")
+    main_menu(message.chat.id)
+
+
+# Просмотр дашборда
+@bot.message_handler(func=lambda message: message.text == "ПВЗ")
+def message_pvz(message):
+    if message.chat.id != manager_chat_id:
+        bot.send_message(message.chat.id, "Только менеджер может просматривать ПВЗ.")
+        main_menu(message.chat.id)
+        return
+    else:
+        markup = types.InlineKeyboardMarkup()
+        pvz = types.InlineKeyboardButton('Посмотреть процент выполнения задач', url=DASHBOARD_URL)
+        markup.row(pvz)
+        bot.send_message(message.chat.id, 'Тыкай👇', parse_mode='html', reply_markup=markup)
+
+
+@bot.message_handler(func=lambda message: message.text == "Удалить задачу")
+def delete_task(message):
+    bot.send_message(message.chat.id, "Введите ID задачи для удаления:")
+    bot.register_next_step_handler(message, process_delete_task)
+
+
+def process_delete_task(message):
+    try:
+        task_id = int(message.text)
+        if task_id in tasks:
+            del tasks[task_id]
+            bot.send_message(message.chat.id, f"Задача ID: {task_id} успешно удалена.")
+        else:
+            bot.send_message(message.chat.id, "Задача с таким ID не найдена.")
+    except ValueError:
+        bot.send_message(message.chat.id, "Пожалуйста, введите корректный ID задачи.")
+
+    main_menu(message.chat.id)
+
+
+@bot.message_handler(func=lambda message: message.text == "🈺Добавить задачу🈺")
 def add_task(message):
+    if message.chat.id != manager_chat_id:
+        bot.send_message(message.chat.id, "Только менеджер может добавалять задачи.")
+        main_menu(message.chat.id)
+        return
+    else:
+        bot.send_message(message.chat.id, "Введите текст задачи:")
+        bot.register_next_step_handler(message, process_add_task)
+
+
+def process_add_task(message):
     global task_id_counter
-    try:
-        task_text = message.text.split('/add_task ', 1)[1]
-        tasks[task_id_counter] = {'text': task_text, 'status': 'pending', 'assignee': None}
-        bot.send_message(message.chat.id, f"Задача добавлена: {task_text} (ID: {task_id_counter})")
-        task_id_counter += 1  # Увеличиваем счетчик ID задач
-    except IndexError:
-        bot.send_message(message.chat.id, "Пожалуйста, укажите текст задачи после команды /add_task.")
+    task_text = message.text
+    tasks[task_id_counter] = {'text': task_text, 'status': 'pending', 'assignee': None}
+    bot.send_message(message.chat.id, f"Задача добавлена: {task_text} (ID: {task_id_counter})")
+    task_id_counter += 1
+    main_menu(message.chat.id)
 
 
-@bot.message_handler(commands=['assign_task'])
-def assign_task(message):
-    try:
-        parts = message.text.split()
-        task_id = int(parts[1])
-        assignee = ' '.join(parts[2:])
-
-        if task_id in tasks:
-            tasks[task_id]['assignee'] = assignee
-            bot.send_message(message.chat.id, f"Исполнитель {assignee} назначен на задачу ID: {task_id}.")
-        else:
-            bot.send_message(message.chat.id, "Задача с таким ID не найдена.")
-    except (IndexError, ValueError):
-        bot.send_message(message.chat.id,
-                         "Пожалуйста, укажите корректный ID задачи и имя исполнителя после команды /assign_task.")
-
-
-@bot.message_handler(commands=['assign_executor'])
-def assign_executor(message):
-    try:
-        parts = message.text.split()
-        task_id = int(parts[1])
-        executor_id = int(parts[2])  # Предполагаем, что исполнитель имеет уникальный ID
-
-        # Здесь вы можете добавить логику для проверки существования исполнителя по executor_id,
-        # например, если у вас есть отдельный словарь исполнителей.
-
-        if task_id in tasks:
-            tasks[task_id]['assignee'] = f"Исполнитель с ID: {executor_id}"
-            bot.send_message(message.chat.id, f"Исполнитель с ID: {executor_id} назначен на задачу ID: {task_id}.")
-        else:
-            bot.send_message(message.chat.id, "Задача с таким ID не найдена.")
-    except (IndexError, ValueError):
-        bot.send_message(message.chat.id,
-                         "Пожалуйста, укажите корректный ID задачи и ID исполнителя после команды /assign_executor.")
-
-
-@bot.message_handler(commands=['view_tasks'])
+@bot.message_handler(func=lambda message: message.text == "📜Просмотреть задачи📜")
 def view_tasks(message):
     if tasks:
         task_list = "\n".join(
@@ -90,12 +109,35 @@ def view_tasks(message):
         bot.send_message(message.chat.id, f"Список задач:\n{task_list}")
     else:
         bot.send_message(message.chat.id, "Нет активных задач.")
+    main_menu(message.chat.id)
 
 
-@bot.message_handler(commands=['complete_task'])
+@bot.message_handler(func=lambda message: message.text == "✔️Завершить задачу✔️")
 def complete_task(message):
+    bot.send_message(message.chat.id, "Введите ID задачи для завершения:")
+    bot.register_next_step_handler(message, process_complete_task)
+
+
+@bot.message_handler(func=lambda message: message.text == "Установить менеджера")
+def set_manager(message):
+    bot.send_message(message.chat.id, "Введите ID менеджера:")
+    bot.register_next_step_handler(message, process_set_manager)
+
+
+def process_set_manager(message):
+    global manager_chat_id
     try:
-        task_id = int(message.text.split('/complete_task ', 1)[1])
+        manager_chat_id = int(message.text)
+        bot.send_message(message.chat.id, f"Менеджер установлен с ID: {manager_chat_id}.")
+    except ValueError:
+        bot.send_message(message.chat.id, "Пожалуйста, введите корректный ID менеджера.")
+
+    main_menu(message.chat.id)
+
+
+def process_complete_task(message):
+    try:
+        task_id = int(message.text)
         if task_id in tasks:
             tasks[task_id]['status'] = 'completed'
             assignee = tasks[task_id]['assignee'] if tasks[task_id]['assignee'] else "неизвестный исполнитель"
@@ -108,45 +150,89 @@ def complete_task(message):
             bot.send_message(message.chat.id, f"Задача ID: {task_id} помечена как выполненная.")
         else:
             bot.send_message(message.chat.id, "Задача с таким ID не найдена.")
-    except (IndexError, ValueError):
-        bot.send_message(message.chat.id, "Пожалуйста, укажите корректный ID задачи после команды /complete_task.")
+    except ValueError:
+        bot.send_message(message.chat.id, "Пожалуйста, введите корректный ID задачи.")
+
+    main_menu(message.chat.id)
 
 
-@bot.message_handler(commands=['delete_task'])
-def delete_task(message):
+@bot.message_handler(func=lambda message: message.text == "Назначить исполнителя")
+def assign_task(message):
+    if message.chat.id != manager_chat_id:
+        bot.send_message(message.chat.id, "Только менеджер может назначать исполнителей на задачи.")
+        main_menu(message.chat.id)
+        return
+
+    if not tasks:
+        bot.send_message(message.chat.id, "Нет доступных задач для назначения исполнителей.")
+        main_menu(message.chat.id)
+        return
+
+    bot.send_message(message.chat.id, "Введите ID задачи для назначения исполнителя:")
+    bot.register_next_step_handler(message, process_assign_task)
+
+
+def process_assign_task(message):
     try:
-        task_id = int(message.text.split('/delete_task ', 1)[1])
+        task_id = int(message.text)
         if task_id in tasks:
-            del tasks[task_id]
-            bot.send_message(message.chat.id, f"Задача ID: {task_id} удалена.")
+            # Отправляем список исполнителей
+            executor_list = "\n".join(f"ID: {executor_id} - {username}" for executor_id, username in executors.items())
+            if executor_list:
+                bot.send_message(message.chat.id, f"Выберите исполнителя:\n{executor_list}\nВведите ID исполнителя:")
+                bot.register_next_step_handler(message, lambda m: assign_executor(m, task_id))
+            else:
+                bot.send_message(message.chat.id, "Нет зарегистрированных исполнителей.")
+                main_menu(message.chat.id)
         else:
             bot.send_message(message.chat.id, "Задача с таким ID не найдена.")
-    except (IndexError, ValueError):
-        bot.send_message(message.chat.id, "Пожалуйста, укажите корректный ID задачи после команды /delete_task.")
+    except ValueError:
+        bot.send_message(message.chat.id, "Пожалуйста, введите корректный ID задачи.")
 
 
-@bot.message_handler(commands=['clear_tasks'])
-def clear_tasks(message):
-    tasks.clear()
-    global task_id_counter
-    task_id_counter = 1  # Сброс счетчика ID задач
-    bot.send_message(message.chat.id, "Все задачи были очищены.")
+def assign_executor(message, task_id):
+    executor_id = message.text.strip()
+
+    # Проверка на наличие исполнителя в зарегистрированных
+    if executor_id in executors:
+        tasks[task_id]['assignee'] = executor_id
+        bot.send_message(message.chat.id, f"Исполнитель с ID {executor_id} назначен на задачу ID {task_id}.")
+    else:
+        bot.send_message(message.chat.id, "Исполнитель с таким ID не найден. Пожалуйста, выберите из списка.")
+
+    main_menu(message.chat.id)
 
 
-@bot.message_handler(commands=['set_manager'])
-def set_manager(message):
-    global manager_chat_id
-    try:
-        manager_chat_id = int(message.text.split('/set_manager ', 1)[1])
-        bot.send_message(message.chat.id, f"Менеджер установлен с ID: {manager_chat_id}.")
-    except (IndexError, ValueError):
-        bot.send_message(message.chat.id, "Пожалуйста, укажите корректный ID менеджера после команды /set_manager.")
+@bot.message_handler(func=lambda message: message.text == "Зарегистрировать исполнителя")
+def register_executor(message):
+    bot.send_message(message.chat.id, "Введите ваш Telegram ID для регистрации:")
+    bot.register_next_step_handler(message, process_register_executor)
 
 
-if __name__ == "__main__":
-    while True:
-        try:
-            bot.polling(none_stop=True)
-        except Exception as e:
-            print(f"Ошибка: {e}")
-            time.sleep(15)
+def process_register_executor(message):
+    executor_id = message.text.strip()
+
+    # Регистрация исполнителя
+    if executor_id not in executors.values():
+        executors[message.from_user.username] = executor_id
+        bot.send_message(message.chat.id, f"Исполнитель с ID {executor_id} зарегистрирован.")
+    else:
+        bot.send_message(message.chat.id, "Этот исполнитель уже зарегистрирован.")
+
+    main_menu(message.chat.id)
+
+
+@bot.message_handler(func=lambda message: message.text == "📋Просмотреть исполнителей📋")
+def view_executors(message):
+    if executors:
+        executor_list = "\n".join(
+            f"Имя пользователя: {username}, ID: {executor_id}" for username, executor_id in executors.items())
+        bot.send_message(message.chat.id, f"Список зарегистрированных исполнителей:\n{executor_list}")
+    else:
+        bot.send_message(message.chat.id, "Нет зарегистрированных исполнителей.")
+
+    main_menu(message.chat.id)
+
+
+# Запуск бота
+bot.polling(none_stop=True)
