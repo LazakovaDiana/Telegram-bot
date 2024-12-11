@@ -1,142 +1,152 @@
 import telebot
-import logging
-from telebot import types
+import time
 
-# Настройка логирования
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+# Замените 'YOUR_BOT_TOKEN' на токен вашего бота
+bot_token = '8181858011:AAFtFMwUVPKWkVWyAz4vf-aN-SWVXRDMpAo'
+bot = telebot.TeleBot(bot_token)
 
-TOKEN = '7628002072:AAEAGCml8FjnYhyZ28fsLooOHBxeURRqKlU'  # Замените на ваш токен
-bot = telebot.TeleBot(TOKEN)
-
-# Словарь для хранения задач и отзывов
+# Словарь для хранения задач
 tasks = {}
-feedbacks = {}
-
-# Список членов команды (замените на реальные chat_id)
-team_members = ['2017269192', '6333621563']  # Добавьте сюда chat_id членов команды
-project_manager_chat_id = '1319913577'  # Замените на реальный chat_id проектного менеджера
-
-
-# Функция для создания главного меню
-def create_main_menu():
-    keyboard = types.ReplyKeyboardMarkup(resize_keyboard=True)
-    keyboard.add(types.KeyboardButton("Добавить задачу"))
-    keyboard.add(types.KeyboardButton("Обновить статус задачи"))
-    keyboard.add(types.KeyboardButton("Собрать обратную связь"))
-    return keyboard
+task_id_counter = 1  # Счетчик для уникальных ID задач
+manager_chat_id = None  # ID менеджера, куда будут отправляться отчеты
 
 
 @bot.message_handler(commands=['start'])
-def start_message(message):
-    """Обрабатывает команду /start и отправляет приветственное сообщение."""
-    bot.send_message(message.chat.id, "Привет! Я бот для управления проектами.", reply_markup=create_main_menu())
-
-
-@bot.message_handler(func=lambda message: message.text == "Добавить задачу")
-def prompt_add_task(message):
-    """Запрашивает у пользователя ввод новой задачи."""
-    bot.send_message(message.chat.id, "Введите задачу:", reply_markup=types.ReplyKeyboardRemove())
-    bot.register_next_step_handler(message, save_task)
-
-
-def save_task(message):
-    """Сохраняет новую задачу и уведомляет проектного менеджера."""
-    task = message.text
-    tasks[message.chat.id] = tasks.get(message.chat.id, []) + [task]
-
-    # Подтверждение получения запроса
-    bot.send_message(message.chat.id, f"Запрос на новую задачу '{task}' принят!", reply_markup=create_main_menu())
-
-    # Уведомление проектного менеджера о новом запросе
-    notify_project_manager(task)
-
-
-def notify_project_manager(task):
-    """Уведомляет проектного менеджера о новой задаче."""
-    bot.send_message(project_manager_chat_id, f"Новая задача: {task}")
-
-
-@bot.message_handler(func=lambda message: message.text == "Обновить статус задачи")
-def prompt_update_status(message):
-    """Запрашивает у пользователя номер задачи для обновления статуса."""
-    user_tasks = tasks.get(message.chat.id, [])
-
-    if not user_tasks:
-        bot.send_message(message.chat.id, "У вас нет задач для обновления.", reply_markup=create_main_menu())
-        return
-
-    # Показать все существующие задачи
-    tasks_list = "\n".join([f"{i + 1}. {task}" for i, task in enumerate(user_tasks)])
+def start(message):
     bot.send_message(message.chat.id,
-                     f"Ваши текущие задачи:\n{tasks_list}\nВведите номер задачи для обновления статуса:",
-                     reply_markup=types.ReplyKeyboardRemove())
-
-    bot.register_next_step_handler(message, update_status)
+                     "Добро пожаловать в бот управления проектами! Используйте /help для получения списка команд.")
 
 
-def update_status(message):
-    """Обновляет статус задачи и уведомляет членов команды."""
+@bot.message_handler(commands=['help'])
+def help_command(message):
+    help_text = (
+        "/add_task <задача> - Добавить новую задачу\n"
+        "/assign_task <ID> <исполнитель> - Назначить исполнителя на задачу по ID\n"
+        "/assign_executor <ID> <исполнитель_id> - Назначить исполнителя по его ID на задачу\n"
+        "/view_tasks - Просмотреть все задачи\n"
+        "/complete_task <ID> - Завершить задачу по ID и отправить отчет менеджеру\n"
+        "/delete_task <ID> - Удалить задачу по ID\n"
+        "/clear_tasks - Очистить все задачи\n"
+        "/set_manager <ID> - Установить ID менеджера для получения отчетов\n"
+    )
+    bot.send_message(message.chat.id, help_text)
+
+
+@bot.message_handler(commands=['add_task'])
+def add_task(message):
+    global task_id_counter
     try:
-        task_index = int(message.text) - 1  # Получаем индекс задачи из введенного номера
-        user_tasks = tasks.get(message.chat.id, [])
+        task_text = message.text.split('/add_task ', 1)[1]
+        tasks[task_id_counter] = {'text': task_text, 'status': 'pending', 'assignee': None}
+        bot.send_message(message.chat.id, f"Задача добавлена: {task_text} (ID: {task_id_counter})")
+        task_id_counter += 1  # Увеличиваем счетчик ID задач
+    except IndexError:
+        bot.send_message(message.chat.id, "Пожалуйста, укажите текст задачи после команды /add_task.")
 
-        if task_index < 0 or task_index >= len(user_tasks):
-            raise ValueError("Неверный номер задачи.")
 
-        task_completed = f"Задача '{user_tasks[task_index]}' завершена."
+@bot.message_handler(commands=['assign_task'])
+def assign_task(message):
+    try:
+        parts = message.text.split()
+        task_id = int(parts[1])
+        assignee = ' '.join(parts[2:])
 
-        # Уведомление всех членов команды и проектного менеджера о завершении задачи
-        for member in team_members:
-            bot.send_message(member, task_completed)
-
-        bot.send_message(project_manager_chat_id, task_completed)
+        if task_id in tasks:
+            tasks[task_id]['assignee'] = assignee
+            bot.send_message(message.chat.id, f"Исполнитель {assignee} назначен на задачу ID: {task_id}.")
+        else:
+            bot.send_message(message.chat.id, "Задача с таким ID не найдена.")
+    except (IndexError, ValueError):
         bot.send_message(message.chat.id,
-                         f"Статус задачи '{user_tasks[task_index]}' обновлен. Уведомлены все члены команды.",
-                         reply_markup=create_main_menu())
-
-        # Удаляем завершенную задачу из списка
-        del user_tasks[task_index]
-        tasks[message.chat.id] = user_tasks
-
-    except ValueError:
-        bot.send_message(message.chat.id, "Пожалуйста, введите корректный номер задачи.",
-                         reply_markup=create_main_menu())
+                         "Пожалуйста, укажите корректный ID задачи и имя исполнителя после команды /assign_task.")
 
 
-@bot.message_handler(func=lambda message: message.text == "Собрать обратную связь")
-def collect_feedback(message):
-    """Запрашивает обратную связь от членов команды."""
-    logging.info("Запрос на сбор обратной связи отправлен.")
+@bot.message_handler(commands=['assign_executor'])
+def assign_executor(message):
+    try:
+        parts = message.text.split()
+        task_id = int(parts[1])
+        executor_id = int(parts[2])  # Предполагаем, что исполнитель имеет уникальный ID
 
-    for member in team_members:
-        bot.send_message(member, "Пожалуйста, дайте обратную связь по завершению этапа выполнения задачи.")
+        # Здесь вы можете добавить логику для проверки существования исполнителя по executor_id,
+        # например, если у вас есть отдельный словарь исполнителей.
 
-    bot.send_message(message.chat.id, "Обратная связь собирается. Пожалуйста, ожидайте.",
-                     reply_markup=create_main_menu())
-
-
-@bot.message_handler(func=lambda m: m.chat.id in team_members)
-def handle_feedback(feedback_message):
-    """Обрабатывает отзывы от членов команды."""
-    logging.info(f"Получен отзыв от {feedback_message.chat.id}: {feedback_message.text}")
-
-    feedbacks[feedback_message.chat.id] = feedback_message.text
-    bot.send_message(feedback_message.chat.id, "Спасибо за ваш отзыв!")
-
-    # Проверка на количество собранных отзывов
-    if len(feedbacks) == len(team_members):
-        feedback_summary = "\n".join([f"От {member}: {feedbacks[member]}" for member in feedbacks])
-        bot.send_message(project_manager_chat_id, f"Собранные отзывы:\n{feedback_summary}")
-        feedbacks.clear()
+        if task_id in tasks:
+            tasks[task_id]['assignee'] = f"Исполнитель с ID: {executor_id}"
+            bot.send_message(message.chat.id, f"Исполнитель с ID: {executor_id} назначен на задачу ID: {task_id}.")
+        else:
+            bot.send_message(message.chat.id, "Задача с таким ID не найдена.")
+    except (IndexError, ValueError):
+        bot.send_message(message.chat.id,
+                         "Пожалуйста, укажите корректный ID задачи и ID исполнителя после команды /assign_executor.")
 
 
-@bot.message_handler(func=lambda message: True)
-def handle_unrecognized_message(message):
-    """Обрабатывает неизвестные сообщения."""
-    logging.info(f"Неизвестное сообщение от {message.chat.id}: {message.text}")
-    bot.send_message(message.chat.id, "Пожалуйста, выберите действие из меню.", reply_markup=create_main_menu())
+@bot.message_handler(commands=['view_tasks'])
+def view_tasks(message):
+    if tasks:
+        task_list = "\n".join(
+            f"ID: {task_id}, Задача: {task['text']}, Статус: {task['status']}, Исполнитель: {task['assignee'] if task['assignee'] else 'не назначен'}"
+            for task_id, task in tasks.items())
+        bot.send_message(message.chat.id, f"Список задач:\n{task_list}")
+    else:
+        bot.send_message(message.chat.id, "Нет активных задач.")
+
+
+@bot.message_handler(commands=['complete_task'])
+def complete_task(message):
+    try:
+        task_id = int(message.text.split('/complete_task ', 1)[1])
+        if task_id in tasks:
+            tasks[task_id]['status'] = 'completed'
+            assignee = tasks[task_id]['assignee'] if tasks[task_id]['assignee'] else "неизвестный исполнитель"
+            report = f"Задача ID: {task_id} выполнена исполнителем {assignee}.\nОписание задачи: {tasks[task_id]['text']}"
+
+            # Отправка отчета менеджеру, если его ID установлен
+            if manager_chat_id:
+                bot.send_message(manager_chat_id, report)
+
+            bot.send_message(message.chat.id, f"Задача ID: {task_id} помечена как выполненная.")
+        else:
+            bot.send_message(message.chat.id, "Задача с таким ID не найдена.")
+    except (IndexError, ValueError):
+        bot.send_message(message.chat.id, "Пожалуйста, укажите корректный ID задачи после команды /complete_task.")
+
+
+@bot.message_handler(commands=['delete_task'])
+def delete_task(message):
+    try:
+        task_id = int(message.text.split('/delete_task ', 1)[1])
+        if task_id in tasks:
+            del tasks[task_id]
+            bot.send_message(message.chat.id, f"Задача ID: {task_id} удалена.")
+        else:
+            bot.send_message(message.chat.id, "Задача с таким ID не найдена.")
+    except (IndexError, ValueError):
+        bot.send_message(message.chat.id, "Пожалуйста, укажите корректный ID задачи после команды /delete_task.")
+
+
+@bot.message_handler(commands=['clear_tasks'])
+def clear_tasks(message):
+    tasks.clear()
+    global task_id_counter
+    task_id_counter = 1  # Сброс счетчика ID задач
+    bot.send_message(message.chat.id, "Все задачи были очищены.")
+
+
+@bot.message_handler(commands=['set_manager'])
+def set_manager(message):
+    global manager_chat_id
+    try:
+        manager_chat_id = int(message.text.split('/set_manager ', 1)[1])
+        bot.send_message(message.chat.id, f"Менеджер установлен с ID: {manager_chat_id}.")
+    except (IndexError, ValueError):
+        bot.send_message(message.chat.id, "Пожалуйста, укажите корректный ID менеджера после команды /set_manager.")
 
 
 if __name__ == "__main__":
-    logging.info("Бот запущен.")
-    bot.polling()
+    while True:
+        try:
+            bot.polling(none_stop=True)
+        except Exception as e:
+            print(f"Ошибка: {e}")
+            time.sleep(15)
