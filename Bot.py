@@ -5,8 +5,7 @@ from telebot import types
 bot_token = '8181858011:AAFtFMwUVPKWkVWyAz4vf-aN-SWVXRDMpAo'
 bot = telebot.TeleBot(bot_token)
 
-# URL дашборда
-DASHBOARD_URL = 'http://127.0.0.1:8050/'
+
 
 # Словарь для хранения задач
 tasks = {}
@@ -54,10 +53,18 @@ def message_pvz(message):
         main_menu(message.chat.id)
         return
     else:
-        markup = types.InlineKeyboardMarkup()
-        pvz = types.InlineKeyboardButton('Посмотреть процент выполнения задач', url=DASHBOARD_URL)
-        markup.row(pvz)
-        bot.send_message(message.chat.id, 'Тыкай👇', parse_mode='html', reply_markup=markup)
+        # Отправка текста и изображений
+        bot.send_message(message.chat.id, "Процент выполненных задач:")
+
+        image_paths = [
+            'задача А.PNG',
+            'задача Б.PNG',
+            'задача В.PNG'
+        ]
+
+        for image_path in image_paths:
+            with open(image_path, 'rb') as photo:
+                bot.send_photo(message.chat.id, photo)
 
 
 @bot.message_handler(func=lambda message: message.text == "Удалить задачу")
@@ -94,7 +101,7 @@ def add_task(message):
 def process_add_task(message):
     global task_id_counter
     task_text = message.text
-    tasks[task_id_counter] = {'text': task_text, 'status': 'pending', 'assignee': None}
+    tasks[task_id_counter] = {'text': task_text, 'status': 'назначена', 'assignee': None}
     bot.send_message(message.chat.id, f"Задача добавлена: {task_text} (ID: {task_id_counter})")
     task_id_counter += 1
     main_menu(message.chat.id)
@@ -139,7 +146,7 @@ def process_complete_task(message):
     try:
         task_id = int(message.text)
         if task_id in tasks:
-            tasks[task_id]['status'] = 'completed'
+            tasks[task_id]['status'] = 'выполнено'
             assignee = tasks[task_id]['assignee'] if tasks[task_id]['assignee'] else "неизвестный исполнитель"
             report = f"Задача ID: {task_id} выполнена исполнителем {assignee}.\nОписание задачи: {tasks[task_id]['text']}"
 
